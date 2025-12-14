@@ -2,6 +2,9 @@
 # Simplified prepare_weights script
 import pandas as pd
 import argparse, re
+import gzip
+import io
+import csv
 
 COLUMN_SYNONYMS = {
     "snp": ["snp","rsid","rs_id","rs","marker","id"],
@@ -25,7 +28,17 @@ parser.add_argument("--sumstats",required=True)
 parser.add_argument("--out",required=True)
 args=parser.parse_args()
 
-df=pd.read_csv(args.sumstats,sep=None,engine="python")
+# Read a sample from the start of the file
+with gzip.open(filename, 'rt') as f:
+    sample = f.read(4096)  # first 4KB
+
+# Detect delimiter
+dialect = csv.Sniffer().sniff(sample)
+delimiter = dialect.delimiter
+print("Detected delimiter:", delimiter)
+
+# Load full dataframe
+df = pd.read_csv(filename, sep=delimiter, compression="infer", low_memory=False)
 
 col_snp=detect(df,"snp")
 col_ea=detect(df,"ea")
