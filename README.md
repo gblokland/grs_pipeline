@@ -1,5 +1,3 @@
-### Author: Gabriella Blokland, Maastricht University
-
 ## Example runs
 
 ### Minimal (auto-naming)
