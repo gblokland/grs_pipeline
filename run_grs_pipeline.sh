@@ -49,29 +49,29 @@ echo "OUT        = $OUT"
 echo
 
 # ---- pipeline ----
-python3 scripts/prepare_weights.py \
+python3 scripts/01_prepare_weights.py \
   --sumstats "$SUMSTATS" \
   --out "weights_${OUT}.raw.txt"
 
-bash scripts/00_check_inputs.sh \
+bash scripts/02_check_inputs.sh \
   -d "${DATA_DIR}/${BEDPREFIX}" \
   -w "weights_${OUT}.raw.txt"
 
-bash scripts/01_clean_weights.sh \
+bash scripts/03_clean_weights.sh \
   -i "weights_${OUT}.raw.txt" \
   -o "weights_${OUT}.clean.txt"
 
-bash scripts/02_run_plink_score.sh \
+bash scripts/04_run_plink_score.sh \
   -d "${DATA_DIR}/${BEDPREFIX}" \
   -w "weights_${OUT}.clean.txt" \
   -o "${RESULTS_DIR}/grs_${OUT}"
 
-Rscript scripts/03_postprocess_scores.R \
+Rscript scripts/05_postprocess_scores.R \
   "${RESULTS_DIR}/grs_${OUT}.sscore" \
   "${DATA_DIR}/${BEDPREFIX}.fam" \
   "${RESULTS_DIR}/final_grs_${OUT}.csv"
 
-bash scripts/99_reproducibility_log.sh \
+bash scripts/06_reproducibility_log.sh \
   -w "weights_${OUT}.clean.txt" \
   -o "${RESULTS_DIR}/reproducibility_${OUT}.log"
 
