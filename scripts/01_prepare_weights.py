@@ -29,7 +29,7 @@ parser.add_argument("--out",required=True)
 args=parser.parse_args()
 
 # Read a sample from the start of the file
-with gzip.open(filename, 'rt') as f:
+with gzip.open(args.sumstats, 'rt') as f:
     sample = f.read(4096)  # first 4KB
 
 # Detect delimiter
@@ -38,7 +38,7 @@ delimiter = dialect.delimiter
 print("Detected delimiter:", delimiter)
 
 # Load full dataframe
-df = pd.read_csv(filename, sep=delimiter, compression="infer", low_memory=False)
+df = pd.read_csv(args.sumstats, sep=delimiter, compression="infer", low_memory=False)
 
 col_snp=detect(df,"snp")
 col_ea=detect(df,"ea")
