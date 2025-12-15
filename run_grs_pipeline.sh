@@ -37,7 +37,7 @@ if [[ -z "$OUT" ]]; then
 fi
 
 DATA_DIR="/root/persistent/data"
-RESULTS_DIR="/root/persistent/results"
+RESULTS_DIR="/root/persistent/results/grs"
 
 mkdir -p "$RESULTS_DIR"
 
@@ -51,20 +51,21 @@ echo
 # ---- pipeline ----
 python3 scripts/01_prepare_weights.py \
   --sumstats "$SUMSTATS" \
-  --out "weights_${OUT}.raw.txt"
+  --outdir "$RESULTS_DIR" \
+  --outfile "weights_${OUT}.raw.txt"
 
 bash scripts/02_check_inputs.sh \
   -d "${DATA_DIR}/${BEDPREFIX}" \
-  -w "weights_${OUT}.raw.txt"
+  -w "${RESULTS_DIR}/weights_${OUT}.raw.txt"
 
 bash scripts/03_clean_weights.sh \
-  -i "weights_${OUT}.raw.txt" \
-  -o "weights_${OUT}.clean.txt" \
+  -i "${RESULTS_DIR}/weights_${OUT}.raw.txt" \
+  -o "${RESULTS_DIR}/weights_${OUT}.clean.txt" \
   -m variant_map_b37.tsv
 
 bash scripts/04_run_plink_score.sh \
   -d "${DATA_DIR}/${BEDPREFIX}" \
-  -w "weights_${OUT}.clean.txt" \
+  -w "${RESULTS_DIR}/weights_${OUT}.clean.txt" \
   -o "${RESULTS_DIR}/grs_${OUT}"
 
 Rscript scripts/05_postprocess_scores.R \
@@ -73,7 +74,7 @@ Rscript scripts/05_postprocess_scores.R \
   "${RESULTS_DIR}/final_grs_${OUT}.csv"
 
 bash scripts/06_reproducibility_log.sh \
-  -w "weights_${OUT}.clean.txt" \
+  -w "${RESULTS_DIR}/weights_${OUT}.clean.txt" \
   -o "${RESULTS_DIR}/reproducibility_${OUT}.log"
 
 echo
