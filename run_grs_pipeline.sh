@@ -49,7 +49,7 @@ echo "OUT        = $OUT"
 echo
 
 # ---- pipeline ----
-if [ -f /root/persistent/ref_panels/hg19_GRCh37/variant_map_b37.tsv ]; then
+if [ ! -f /root/persistent/ref_panels/hg19_GRCh37/variant_map_b37.tsv ]; then
     bash scripts/00_make_variant_map.sh
 fi
 
