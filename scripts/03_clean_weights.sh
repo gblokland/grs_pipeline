@@ -4,42 +4,81 @@ set -euo pipefail
 usage() {
   cat <<EOF
 Usage:
-  $0 -i <raw_weights> -o <clean_weights>
+  $0 -i <raw_weights> -o <clean_weights> -m <variant_map>
 
 Options:
-  -i   Input raw weights file
-  -o   Output cleaned weights file
+  -i   Input raw weights file (SNP EA OA BETA)
+  -o   Output cleaned weights file (rsID EA OA BETA)
+  -m   Variant map (positional_id -> rsID)
 EOF
   exit 1
 }
 
-# ---- defaults (optional) ----
 INPUT=""
 CLEAN=""
+MAP=""
 
-# ---- parse args ----
-while getopts ":i:o:h" opt; do
+while getopts ":i:o:m:h" opt; do
   case $opt in
     i) INPUT="$OPTARG" ;;
     o) CLEAN="$OPTARG" ;;
+    m) MAP="$OPTARG" ;;
     h) usage ;;
     *) usage ;;
   esac
 done
 
-# ---- validate args ----
-if [[ -z "$INPUT" || -z "$CLEAN" ]]; then
-  echo "[ERROR] Missing required arguments."
+if [[ -z "$INPUT" || -z "$CLEAN" || -z "$MAP" ]]; then
+  echo "[ERROR] Missing required arguments"
   usage
 fi
 
-echo "[STEP 1] Cleaning weight file..."
+echo "[STEP] Cleaning weights + mapping SNP IDs"
 echo "  INPUT = $INPUT"
-echo "  OUTPUT = $CLEAN"
+echo "  MAP   = $MAP"
+echo "  OUT   = $CLEAN"
 
-# ---- run cleaning ----
-grep -v -E "A T|T A|G C|C G" "$INPUT" \
-  | awk 'NR==1 || NF>=3 {print $1, $2, $3}' \
-  > "$CLEAN"
+# Expected INPUT columns:
+# SNP  effect_allele  other_allele  beta
 
-echo "[STEP 1] Cleaned weights written to: $CLEAN"
+awk -v MAP="$MAP" '
+BEGIN {
+  FS=OFS="\t"
+
+  # Load variant map: positional_id -> rsID
+  while ((getline < MAP) > 0) {
+    if (NR==1 && $1 ~ /CHR|pos|rs/i) continue
+    map[$1]=$2
+  }
+  close(MAP)
+}
+
+NR==1 {
+  print "SNP","A1","A2","BETA"
+  next
+}
+
+{
+  snp=$1
+  a1=toupper($2)
+  a2=toupper($3)
+  beta=$4
+
+  # Drop ambiguous SNPs
+  if ((a1=="A" && a2=="T") || (a1=="T" && a2=="A") ||
+      (a1=="G" && a2=="C") || (a1=="C" && a2=="G")) next
+
+  # Map positional SNP → rsID
+  if (!(snp in map)) next
+  rsid = map[snp]
+
+  # Keep only valid betas
+  if (beta=="" || beta=="NA") next
+
+  print rsid, a1, a2, beta
+}
+' "$INPUT" \
+| awk '!seen[$1]++' \
+> "$CLEAN"
+
+echo "[OK] Cleaned weights written to: $CLEAN"
