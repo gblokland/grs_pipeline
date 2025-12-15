@@ -61,7 +61,7 @@ bash scripts/02_check_inputs.sh \
 bash scripts/03_clean_weights.sh \
   -i "${RESULTS_DIR}/weights_${OUT}.raw.txt" \
   -o "${RESULTS_DIR}/weights_${OUT}.clean.txt" \
-  -m variant_map_b37.tsv
+  -m /root/persistent/ref_panels/hg19_GRCh37/variant_map_b37.tsv
 
 bash scripts/04_run_plink_score.sh \
   -d "${DATA_DIR}/${BEDPREFIX}" \
