@@ -59,7 +59,8 @@ bash scripts/02_check_inputs.sh \
 
 bash scripts/03_clean_weights.sh \
   -i "weights_${OUT}.raw.txt" \
-  -o "weights_${OUT}.clean.txt"
+  -o "weights_${OUT}.clean.txt" \
+  -m variant_map_b37.tsv
 
 bash scripts/04_run_plink_score.sh \
   -d "${DATA_DIR}/${BEDPREFIX}" \
