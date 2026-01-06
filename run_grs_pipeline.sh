@@ -81,6 +81,41 @@ bash scripts/06_reproducibility_log.sh \
   -w "${RESULTS_DIR}/weights_${OUT}.clean.txt" \
   -o "${RESULTS_DIR}/reproducibility_${OUT}.log"
 
+# ---- PLOTTING SECTION ----
+
+# Run the plotting script
+echo
+echo "=== GENERATING PLOTS ==="
+
+Rscript scripts/07_plot_grs_results.R \
+  "${RESULTS_DIR}/final_grs_${OUT}.csv" \
+  "${RESULTS_DIR}/plots_${OUT}"
+
+# ---- optional extra argument for quantile choice ----
+# Options are:
+# QUANTILES="terciles"
+# QUANTILES="quartiles"
+# QUANTILES="quintiles"
+# QUANTILES="deciles"
+# QUANTILES="all"  #default is all of the above
+
+QUANTILES=${4:-"all"}
+
+echo "Quantile option = $QUANTILES"
+
+# ---- R MARKDOWN REPORTING ----
+
+echo
+echo "=== CREATING R MARKDOWN REPORT ==="
+
+PHENO_TABLE="${DATA_DIR}/phenotypes.csv"
+
+Rscript scripts/08_make_grs_html_report.R \
+  "${RESULTS_DIR}/final_grs_${OUT}.csv" \
+  "$PHENO_TABLE" \
+  "${RESULTS_DIR}/report_${OUT}" \
+  "$QUANTILES"
+
 echo
 echo "=== PIPELINE FINISHED ==="
 date
