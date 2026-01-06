@@ -1,5 +1,13 @@
 #!/usr/bin/env Rscript
 
+install_if_needed <- function(pkg) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    install.packages(pkg, repos = "https://cloud.r-project.org")
+  }
+}
+
+install_if_needed("data.table")
+
 suppressPackageStartupMessages({
   library(data.table)
 })
