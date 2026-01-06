@@ -1,0 +1,174 @@
+---
+title: "Genetic Risk Score Analysis Report"
+output: html_document
+params:
+  grs_table: NA
+  pheno_table: NA
+  prefix: NA
+  quantiles: "all"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+install_if_needed <- function(pkg) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    install.packages(pkg, repos = "https://cloud.r-project.org")
+  }
+}
+
+install_if_needed("ggplot2")
+install_if_needed("dplyr")
+install_if_needed("tidyr")
+
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+```
+
+# Load Data
+
+```{r load}
+grs <- read.csv(params$grs_table)
+pheno <- read.csv(params$pheno_table)
+
+dat <- merge(grs, pheno, by="IID")
+
+grs_vars <- grep("^GRS", colnames(dat), value=TRUE)
+pheno_vars <- setdiff(colnames(pheno), "IID")
+```
+
+# Quantile Construction
+
+```{r make-quantiles}
+q_option <- tolower(params$quantiles)
+
+all_types <- c("terciles","quartiles","quintiles","deciles","all")
+
+chosen <- if (q_option == "all") {
+  c("terciles","quartiles","quintiles","deciles","deciles10")
+} else {
+  unlist(strsplit(q_option, ","))
+}
+
+make_split <- function(vec, n, name) {
+  nt <- ntile(vec, n)
+  return(nt)
+}
+
+for (g in grs_vars) {
+  vec <- dat[[g]]
+
+  if ("terciles" %in% chosen) {
+    dat[[paste0(g,"_tercile")]] <- make_split(vec, 3)
+  }
+
+  if ("quartiles" %in% chosen) {
+    dat[[paste0(g,"_quartile")]] <- make_split(vec, 4)
+  }
+
+  if ("quintiles" %in% chosen) {
+    dat[[paste0(g,"_quintile")]] <- make_split(vec, 5)
+  }
+
+  if ("deciles" %in% chosen) {
+    dat[[paste0(g,"_decile")]] <- make_split(vec, 10)
+  }
+}
+```
+
+# Scatterplots by Chosen Quantiles
+
+```{r plots}
+for (g in grs_vars) {
+  for (ph in pheno_vars) {
+
+    if ("terciles" %in% chosen) {
+      p <- ggplot(dat, aes_string(x=g, y=ph)) +
+        geom_point() +
+        facet_wrap(as.formula(paste("~", paste0(g,"_tercile")))) +
+        ggtitle(paste(g, "vs", ph, "by terciles"))
+      print(p)
+    }
+
+    if ("quartiles" %in% chosen) {
+      p <- ggplot(dat, aes_string(x=g, y=ph)) +
+        geom_point() +
+        facet_wrap(as.formula(paste("~", paste0(g,"_quartile")))) +
+        ggtitle(paste(g, "vs", ph, "by quartiles"))
+      print(p)
+    }
+
+    if ("quintiles" %in% chosen) {
+      p <- ggplot(dat, aes_string(x=g, y=ph)) +
+        geom_point() +
+        facet_wrap(as.formula(paste("~", paste0(g,"_quintile")))) +
+        ggtitle(paste(g, "vs", ph, "by quintiles"))
+      print(p)
+    }
+
+    if ("deciles" %in% chosen) {
+      p <- ggplot(dat, aes_string(x=g, y=ph)) +
+        geom_point() +
+        facet_wrap(as.formula(paste("~", paste0(g,"_decile")))) +
+        ggtitle(paste(g, "vs", ph, "by deciles"))
+      print(p)
+    }
+  }
+}
+```
+
+# Boxplots Across All Phenotypes
+
+```{r boxplots}
+for (g in grs_vars) {
+
+  if ("terciles" %in% chosen) {
+    p <- ggplot(dat, aes_string(x=paste0(g,"_tercile"), y=g)) +
+      geom_boxplot() +
+      ggtitle(paste("Boxplot of", g, "by terciles"))
+    print(p)
+  }
+
+  if ("quartiles" %in% chosen) {
+    p <- ggplot(dat, aes_string(x=paste0(g,"_quartile"), y=g)) +
+      geom_boxplot() +
+      ggtitle(paste("Boxplot of", g, "by quartiles"))
+    print(p)
+  }
+
+  if ("quintiles" %in% chosen) {
+    p <- ggplot(dat, aes_string(x=paste0(g,"_quintile"), y=g)) +
+      geom_boxplot() +
+      ggtitle(paste("Boxplot of", g, "by quintiles"))
+    print(p)
+  }
+
+  if ("deciles" %in%colnames(dat)) {
+    p <- ggplot(dat, aes_string(x=paste0(g,"_decile"), y=g)) +
+      geom_boxplot() +
+      ggtitle(paste("Boxplot of", g, "by deciles"))
+    print(p)
+  }
+}
+```
+
+# Decile Trend Analysis
+
+```{r trend}
+for (g in grs_vars) {
+
+  if ("deciles" %in% chosen) {
+    trend <- dat %>%
+      group_by(.data[[paste0(g,"_decile")]]) %>%
+      summarise(mean_ph = mean(.data[[pheno_vars[1]]], na.rm=TRUE))
+
+    p <- ggplot(trend, aes_string(x=names(trend)[1], y="mean_ph")) +
+      geom_line() +
+      ggtitle(paste("Trend across deciles for", g))
+
+    print(p)
+  }
+}
+```
+
