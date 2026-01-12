@@ -35,7 +35,7 @@ sscore_file <- args[1]
 fam_file    <- args[2]
 out_file    <- args[3]
 
-cat("[STEP 3] Postprocessing scores\n")
+cat("[STEP 5] Postprocessing scores\n")
 cat("  sscore =", sscore_file, "\n")
 cat("  fam    =", fam_file, "\n")
 cat("  out    =", out_file, "\n")
@@ -52,7 +52,16 @@ if (!file.exists(fam_file)) {
 sscore <- fread(sscore_file)
 fam <- fread(fam_file, header = FALSE)
 
+# ---- fix PLINK header quirks ----
+setnames(sscore, "#FID", "FID", skip_absent = TRUE)
 setnames(fam, 1:2, c("FID", "IID"))
+
+# ---- sanity checks ----
+required_cols <- c("FID", "IID", "SCORE1_AVG")
+missing <- setdiff(required_cols, names(sscore))
+if (length(missing)) {
+  stop("Missing required columns in sscore file: ", paste(missing, collapse = ", "))
+}
 
 # ---- merge ----
 dt <- merge(
@@ -63,14 +72,10 @@ dt <- merge(
 )
 
 # ---- compute scores ----
-if (!"SCORE1_SUM" %in% names(dt)) {
-  stop("Expected column SCORE1_SUM not found in sscore file")
-}
-
-dt[, GRS_raw := SCORE1_SUM]
-dt[, GRS_z := as.numeric(scale(GRS_raw))]
+dt[, GRS_raw := SCORE1_AVG]
+dt[, GRS_z   := as.numeric(scale(GRS_raw))]
 
 # ---- write output ----
 fwrite(dt, out_file)
 
-cat("[STEP 3] Final scored dataset written to:", out_file, "\n")
+cat("[STEP 5] Final scored dataset written to:", out_file, "\n")
