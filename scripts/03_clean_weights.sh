@@ -33,7 +33,7 @@ if [[ -z "$INPUT" || -z "$CLEAN" || -z "$MAP" ]]; then
   usage
 fi
 
-echo "[STEP] Cleaning weights + mapping SNP IDs"
+echo "[STEP 3] Cleaning weights + mapping SNP IDs"
 echo "  INPUT = $INPUT"
 echo "  MAP   = $MAP"
 echo "  OUT   = $CLEAN"
@@ -45,40 +45,79 @@ awk -v MAP="$MAP" '
 BEGIN {
   FS=OFS="\t"
 
-  # Load variant map: positional_id -> rsID
+  kept=drop_ambig=drop_nomap=drop_beta=drop_dup=total=0
+
+  # ---- load variant map (chr:pos -> rsid) ----
+  map_n=0
   while ((getline < MAP) > 0) {
-    if (NR==1 && $1 ~ /CHR|pos|rs/i) continue
-    map[$1]=$2
+    map_n++
+    if (map_n == 1) continue   # skip header
+    # columns: chr pos ref alt rsid
+    key = $1 ":" $2
+    map[key] = $5
   }
   close(MAP)
 }
 
-NR==1 {
+# ---- input header ----
+FNR==1 {
   print "SNP","A1","A2","BETA"
   next
 }
 
 {
+  total++
+
   snp=$1
   a1=toupper($2)
   a2=toupper($3)
   beta=$4
 
-  # Drop ambiguous SNPs
+  # ambiguous SNPs
   if ((a1=="A" && a2=="T") || (a1=="T" && a2=="A") ||
-      (a1=="G" && a2=="C") || (a1=="C" && a2=="G")) next
+      (a1=="G" && a2=="C") || (a1=="C" && a2=="G")) {
+    drop_ambig++
+    next
+  }
 
-  # Map positional SNP → rsID
-  if (!(snp in map)) next
-  rsid = map[snp]
+  # ---- SNP ID handling ----
+  if (snp ~ /^rs[0-9]+$/) {
+    rsid = snp
+  } else {
+    # expect positional format chr:pos
+    if (!(snp in map)) {
+      drop_nomap++
+      next
+    }
+    rsid = map[snp]
+  }
 
-  # Keep only valid betas
-  if (beta=="" || beta=="NA") next
+  # beta must be numeric
+  if (beta=="" || beta=="NA") {
+    drop_beta++
+    next
+  }
+
+  # deduplicate
+  if (seen[rsid]++) {
+    drop_dup++
+    next
+  }
 
   print rsid, a1, a2, beta
+  kept++
 }
-' "$INPUT" \
-| awk '!seen[$1]++' \
-> "$CLEAN"
+
+END {
+  print "=== WEIGHT CLEANING SUMMARY ===" > "/dev/stderr"
+  print "Total variants read     :", total > "/dev/stderr"
+  print "Kept variants           :", kept > "/dev/stderr"
+  print "Dropped ambiguous       :", drop_ambig > "/dev/stderr"
+  print "Dropped not in map      :", drop_nomap > "/dev/stderr"
+  print "Dropped invalid beta    :", drop_beta > "/dev/stderr"
+  print "Dropped duplicates      :", drop_dup > "/dev/stderr"
+}
+' "$INPUT" > "$CLEAN"
 
 echo "[OK] Cleaned weights written to: $CLEAN"
+echo "[STEP 3] Completed."
