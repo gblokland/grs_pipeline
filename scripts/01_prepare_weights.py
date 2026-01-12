@@ -14,28 +14,35 @@ import re
 
 # Column synonyms
 COLUMN_SYNONYMS = {
-    "chr": ["chromosome","chrom","chr"],
-    "bp": ["bp","pos","base_pair_location"],
+    "chr": ["chr","chromosome","chrom"],
+    "bp": ["bp","pos","base_pair_location","base_pair_position"],
     "snp": ["snp","rsid","rs_id","rs","marker","id","variant_id"],
-    "ea": ["effect_allele","ea","a1","allele1","alt"],
-    "oa": ["other_allele","non_effect_allele","nea","a2","allele2","ref"],
+    "ea": ["ea","effect_allele","a1","allele1","alt","alternative_allele"],
+    "oa": ["oa","nea","other_allele","non_effect_allele","a2","allele2","ref","reference_allele"],
+    "eaf": ["eaf","effect_allele_frequency","allele_frequency","af","maf"],
     "beta": ["beta","effect","logor","log_odds"],
-    "or": ["or","odds_ratio"],
-    "p": ["p","pval","pvalue","p_value"],
-    "se": ["se","stderr","standard_error"]
+    "or": ["or","odds_ratio","oddsratio"],
+    "p": ["p","pval","p_val","pvalue","p_value"],
+    "se": ["se","stderr","std_err","standard_error"],
+    "cilb": ["cilb","ci_lower","ci_lb"],
+    "ciub": ["ciub","ci_upper","ci_ub"]
 }
 
 def detect(df, target):
-    """
-    Detect a column in df that matches the target using COLUMN_SYNONYMS.
-    Checks both hm_ prefixed and plain columns.
-    """
-    for prefix in ["hm_", ""]:
-        for col in df.columns:
-            c = col.lower()
-            for s in COLUMN_SYNONYMS[target]:
-                if c.startswith(prefix+s):
-                    return col
+    synonyms = COLUMN_SYNONYMS[target]
+    cols = {c.lower(): c for c in df.columns}
+
+    # exact match first (highest priority)
+    for s in synonyms:
+        if s in cols:
+            return cols[s]
+
+    # hm_ prefixed exact match
+    for s in synonyms:
+        key = "hm_" + s
+        if key in cols:
+            return cols[key]
+
     return None
 
 def main():
@@ -57,11 +64,10 @@ def main():
     print("Columns detected:", df.columns.tolist())
     print("Rows before filtering:", len(df))
 
-    # Detect columns
+    # Detect SNP and allele columns
     col_snp = detect(df, "snp")
     col_ea  = detect(df, "ea")
     col_oa  = detect(df, "oa")
-    col_beta = detect(df, "beta")
 
     if col_snp is None or col_ea is None or col_oa is None:
         raise ValueError(f"Could not detect required SNP/EA/OA columns. Columns: {df.columns.tolist()}")
@@ -69,23 +75,36 @@ def main():
     # Detect numeric effect size column
     col_beta = detect(df, "beta")
 
-    if col_beta is not None:
-        # Extract numeric part, remove text/range
-        df["BETA"] = pd.to_numeric(df[col_beta].astype(str).str.extract(r'([0-9.eE+-]+)')[0], errors="coerce")
-    else:
-        # try OR or odds_ratio
-        or_col = detect(df, "or")
-        if or_col is not None:
-            df["BETA"] = pd.to_numeric(df[or_col].astype(str).str.extract(r'([0-9.eE+-]+)')[0], errors="coerce").apply(np.log)
-        else:
-            raise ValueError("Could not detect numeric BETA or OR column")
+    #if col_beta is not None:
+    #    # Extract numeric part, remove text/range
+    #    df["beta"] = pd.to_numeric(df[col_beta].astype(str).str.extract(r'([0-9.eE+-]+)')[0], errors="coerce")
+    #else:
+    #    # try OR or odds_ratio
+    #    or_col = detect(df, "or")
+    #    if or_col is not None:
+    #        df["beta"] = pd.to_numeric(df[or_col].astype(str).str.extract(r'([0-9.eE+-]+)')[0], errors="coerce").apply(np.log)
+    #    else:
+    #        raise ValueError("Could not detect numeric BETA or OR column")
     
+    if col_beta is not None:
+        df["beta"] = pd.to_numeric(df[col_beta], errors="coerce")
+    else:
+        col_or = detect(df, "or")
+        if col_or is None:
+            raise ValueError("No BETA or OR column detected")
+        df["beta"] = pd.to_numeric(df[col_or], errors="coerce").apply(np.log)
+
+    if df["beta"].notna().sum() == 0:
+        raise ValueError(
+            f"Detected beta column '{col_beta}' but all values are non-numeric"
+        )
+        
     # Build output dataframe
     out = pd.DataFrame()
     out["SNP"] = df[col_snp]
     out["effect_allele"] = df[col_ea].str.upper()
     out["other_allele"] = df[col_oa].str.upper()
-    out["beta"] = df[col_beta]
+    out["beta"] = df["beta"]
 
     # Drop rows with missing beta
     out = out.dropna(subset=["beta"])
