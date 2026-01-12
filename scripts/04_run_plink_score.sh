@@ -38,15 +38,16 @@ fi
 OUTDIR=$(dirname "$OUT")
 mkdir -p "$OUTDIR"
 
-echo "[STEP 2] Running PLINK2 scoring..."
+echo "[STEP 4] Running PLINK2 scoring..."
 echo "  DATA    = $DATA"
 echo "  WEIGHTS = $WEIGHTS"
 echo "  OUT     = $OUT"
 
 plink2 \
   --bfile "$DATA" \
-  --score "$WEIGHTS" 1 2 3 header \
+  --score "$WEIGHTS" 1 2 4 header \
   --out "$OUT"
+  #--score "$WEIGHTS" 1 2 3 header \
 
-echo "[STEP 2] Completed."
+echo "[STEP 4] Completed."
 echo "  Output file: ${OUT}.sscore"
