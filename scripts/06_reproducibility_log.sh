@@ -40,7 +40,7 @@ fi
 LOGDIR=$(dirname "$LOG")
 mkdir -p "$LOGDIR"
 
-echo "[LOG] Writing reproducibility log..."
+echo "[STEP 6] Writing reproducibility log..."
 echo "  WEIGHTS = $WEIGHTS"
 echo "  LOG     = $LOG"
 
@@ -54,4 +54,4 @@ echo "  LOG     = $LOG"
   md5sum "$WEIGHTS"
 } > "$LOG"
 
-echo "[LOG] Log created at: $LOG"
+echo "[STEP 6] Log created at: $LOG"
