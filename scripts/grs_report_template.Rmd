@@ -1,15 +1,27 @@
 ---
 title: "Genetic Risk Score Analysis Report"
-output: html_document
+output: 
+  html_document:
+    toc: true        # Add table of contents
+    toc_float: false  # Float TOC on the side
 params:
   grs_table: NA
   pheno_table: NA
+  outdir: NA
   prefix: NA
   quantiles: "all"
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(cache = FALSE)
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, fig.align='center', fig.width=6, fig.height=4)
+outdir <- params$outdir
+if (!dir.exists(file.path(outdir, "rendered_plots"))) {
+  dir.create(file.path(outdir, "rendered_plots"), recursive = TRUE)
+}
+# This will automatically save every plot generated in the report 
+# into a folder named "rendered_plots/"
+knitr::opts_chunk$set(fig.path = paste0(outdir, "/", "rendered_plots/report-"))
 
 install_if_needed <- function(pkg) {
   if (!requireNamespace(pkg, quietly = TRUE)) {
@@ -20,155 +32,491 @@ install_if_needed <- function(pkg) {
 install_if_needed("ggplot2")
 install_if_needed("dplyr")
 install_if_needed("tidyr")
+install_if_needed("readr")
+install_if_needed("ggpmisc")
 
 library(ggplot2)
 library(dplyr)
 library(tidyr)
+library(readr)
+library(ggpmisc)
 ```
 
 # Load Data
 
-```{r load}
-grs <- read.csv(params$grs_table)
-pheno <- read.csv(params$pheno_table)
+```{r load_data}
+cat("\n\n## ", "Loading GRS table", params$grs_table, "\n\n")
+dat <- read.csv(params$grs_table)
 
-dat <- merge(grs, pheno, by="IID")
+has_pheno <- !is.null(params$pheno_table) &&
+  nzchar(params$pheno_table) &&
+  file.exists(params$pheno_table) &&
+  file.info(params$pheno_table)$size > 0
 
-grs_vars <- grep("^GRS", colnames(dat), value=TRUE)
-pheno_vars <- setdiff(colnames(pheno), "IID")
-```
-
-# Quantile Construction
-
-```{r make-quantiles}
-q_option <- tolower(params$quantiles)
-
-all_types <- c("terciles","quartiles","quintiles","deciles","all")
-
-chosen <- if (q_option == "all") {
-  c("terciles","quartiles","quintiles","deciles","deciles10")
+if (has_pheno) {
+  cat("\n\n## ", "Loading pheno table", params$pheno_table, "\n\n")
+  pheno <- read.csv(params$pheno_table)
+  if (!"IID" %in% names(pheno)) stop("Phenotype table must contain 'IID' and 'FID' column")
+  pheno <- pheno %>% mutate(across(everything(), ~na_if(.x, -9)))
+  dat$FID <- as.character(dat$FID)
+  pheno$FID <- as.character(pheno$FID)
+  dat$IID <- as.character(dat$IID)
+  pheno$IID <- as.character(pheno$IID)
+  dat <- merge(dat, pheno, by=c("FID", "IID"), all.x=TRUE)
 } else {
-  unlist(strsplit(q_option, ","))
+  cat("\n\n## ", "No pheno table specified", "\n\n")
+  pheno <- NULL
 }
 
-make_split <- function(vec, n, name) {
-  nt <- ntile(vec, n)
-  return(nt)
-}
+grs_vars <- grep("^GRS", names(dat), value = TRUE)
+if (length(grs_vars)==0) stop("No GRS variables detected")
 
-for (g in grs_vars) {
-  vec <- dat[[g]]
+pheno_vars <- if (!is.null(pheno)) setdiff(names(pheno), c("FID","IID")) else character(0)
+has_pheno_vars <- length(pheno_vars) > 0
 
-  if ("terciles" %in% chosen) {
-    dat[[paste0(g,"_tercile")]] <- make_split(vec, 3)
-  }
-
-  if ("quartiles" %in% chosen) {
-    dat[[paste0(g,"_quartile")]] <- make_split(vec, 4)
-  }
-
-  if ("quintiles" %in% chosen) {
-    dat[[paste0(g,"_quintile")]] <- make_split(vec, 5)
-  }
-
-  if ("deciles" %in% chosen) {
-    dat[[paste0(g,"_decile")]] <- make_split(vec, 10)
-  }
-}
+prefix <- params$prefix
 ```
 
-# Scatterplots by Chosen Quantiles
+# Debug Check
 
-```{r plots}
-for (g in grs_vars) {
+```{r debug_check, echo=TRUE}
+cat("--- DEBUG INFO ---\n")
+cat("Rows in dat:", nrow(dat), "\n")
+cat("Columns in dat:", paste(names(dat), collapse=", "), "\n")
+head(dat, 5)
+cat("GRS variables identified:", paste(grs_vars, collapse=", "), "\n")
+cat("Phenotype variables identified:", paste(pheno_vars, collapse=", "), "\n")
+cat("Has Pheno Vars?", has_pheno_vars, "\n")
+
+ensure_dir <- function(path) {
+  dir.create(path, showWarnings = FALSE, recursive = TRUE)
+}
+
+outdir <- params$outdir
+ensure_dir(outdir)
+
+safe_print_plot <- function(p) {
+  print(p)
+  grDevices::dev.flush()
+}
+
+
+# ----------------------------
+# Helper save function
+# ----------------------------
+save_plot <- function(p, name, w = 7, h = 5) {
+  ggsave(
+    filename = file.path(outdir, paste0(name, ".png")),
+    plot = p,
+    width = w,
+    height = h,
+    dpi = 300
+  )
+}
+theme_set(theme_bw())
+
+```
+
+# 1️⃣ Histogram of raw GRS
+
+```{r histogram, results='asis', fig.show='asis', fig.keep='all', warning=FALSE, message=FALSE}
+p <- ggplot(dat, aes(x = GRS_raw)) +
+  geom_histogram(bins = 50, fill = "steelblue", color = "white") +
+  labs(title = "Distribution of GRS", x = "GRS_raw", y = "Count") +
+  theme(plot.title = element_text(hjust = 0.5))
+safe_print_plot(p)
+save_plot(p, "01_grs_histogram")
+```
+
+# 2️⃣ Z-score normalized GRS distribution
+
+```{r density, results='asis', fig.show='asis', fig.keep='all', warning=FALSE, message=FALSE}
+#df <- df %>% mutate(GRS_z = as.numeric(scale(GRS_raw)))
+
+p <- ggplot(dat, aes(x = GRS_z)) +
+  geom_density(fill = "steelblue", alpha = 0.4) +
+  labs(title = "Z-score Normalized GRS", x = "GRS (z)", y = "Density") +
+  theme(plot.title = element_text(hjust = 0.5))
+safe_print_plot(p)
+save_plot(p, "02_grs_zscore_density")
+```
+
+# 3️⃣ Boxplot/violin plot GRS distribution
+
+```{r boxplot_overall, results='asis', fig.show='asis', fig.keep='all', warning=FALSE, message=FALSE}
+#df <- df %>% mutate(GRS_z = as.numeric(scale(GRS_raw)))
+
+p <- ggplot(dat, aes(x = "", y = GRS_z)) +
+  geom_violin(alpha = 0.4, trim = FALSE, fill = "steelblue") +
+  geom_boxplot(width = 0.1, alpha = 0.7, fill = "steelblue") +
+  labs(title = "Z-score Normalized GRS", x = NULL, y = "GRS (z)") +
+  theme_bw() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  )
+safe_print_plot(p)
+save_plot(p, "03_grs_zscore_box-violin")
+```
+
+# 4️⃣ Create Quantiles
+
+```{r quantiles}
+q_option <- tolower(params$quantiles)
+all_types <- c("terciles","quartiles","quintiles","deciles")
+chosen_q <- if (q_option=="all") all_types else unlist(strsplit(q_option,","))
+
+cat("\n\n## ", "Chosen quantiles:", chosen_q, "\n\n")
+
+add_quantiles <- function(dat, grs_vars, chosen_q) {
+  make_split <- function(vec, n) dplyr::ntile(vec, n)
+  
+  for (g in grs_vars) {
+    vec <- dat[[g]]
+    if ("terciles"  %in% chosen_q) dat[[paste0(g, "_terciles")]]  <- make_split(vec, 3)
+    if ("quartiles" %in% chosen_q) dat[[paste0(g, "_quartiles")]] <- make_split(vec, 4)
+    if ("quintiles" %in% chosen_q) dat[[paste0(g, "_quintiles")]] <- make_split(vec, 5)
+    if ("deciles"   %in% chosen_q) dat[[paste0(g, "_deciles")]]   <- make_split(vec, 10)
+  }
+  dat
+}
+
+dat <- add_quantiles(dat, grs_vars, chosen_q)
+
+```
+
+# 5️⃣ Boxplots QUANTILE-GRS
+
+```{r boxplots1, results='asis', fig.show='asis', fig.keep='all', warning=FALSE, message=FALSE}
+plot_grs_quantiles <- function(dat, grs_vars, chosen_q, prefix, outdir) {
+  for (g in grs_vars) {
+    for (q in chosen_q) {
+      q_col <- paste0(g, "_", q)
+      if (!q_col %in% names(dat)) next
+      
+      df <- dat[, c(g, q_col)]
+      names(df) <- c("GRS", "QUANTILE")
+      df <- df[!is.na(df$GRS) & !is.na(df$QUANTILE), ]
+      if (nrow(df) == 0) next
+      
+      df$QUANTILE <- factor(df$QUANTILE)
+      
+      p <- ggplot(df, aes(x = QUANTILE, y = GRS, fill = QUANTILE)) +
+        geom_violin(alpha = 0.4, trim = FALSE) +
+        geom_boxplot(alpha = 0.7) +
+        scale_fill_brewer(palette = "Blues") +
+        labs(title = paste(g, "by", q),
+             x = q,
+             y = g) +
+        theme_bw() +
+        theme(plot.title = element_text(hjust = 0.5))
+      
+      safe_print_plot(p)
+      ggsave(file.path(outdir, paste0(prefix, "_", g, "_", q, "_boxplot.png")),
+             p, width = 15, height = 10, units = "cm", dpi = 300)
+    }
+  }
+}
+
+plot_grs_quantiles(dat, grs_vars, chosen_q, prefix, outdir)
+
+```
+
+# 6️⃣ Boxplots Multipanel QUANTILE-PHENO
+
+```{r boxplots2, results='asis', fig.show='asis', fig.keep='all', fig.width=10, fig.height=6, warning=FALSE}
+
+plot_pheno_boxplots_multipanel <- function(dat, grs_vars, pheno_vars, chosen_q, prefix, outdir) {
+  
+  if (length(pheno_vars) == 0) return()  # no phenotypes to plot
+  
   for (ph in pheno_vars) {
-
-    if ("terciles" %in% chosen) {
-      p <- ggplot(dat, aes_string(x=g, y=ph)) +
-        geom_point() +
-        facet_wrap(as.formula(paste("~", paste0(g,"_tercile")))) +
-        ggtitle(paste(g, "vs", ph, "by terciles"))
-      print(p)
-    }
-
-    if ("quartiles" %in% chosen) {
-      p <- ggplot(dat, aes_string(x=g, y=ph)) +
-        geom_point() +
-        facet_wrap(as.formula(paste("~", paste0(g,"_quartile")))) +
-        ggtitle(paste(g, "vs", ph, "by quartiles"))
-      print(p)
-    }
-
-    if ("quintiles" %in% chosen) {
-      p <- ggplot(dat, aes_string(x=g, y=ph)) +
-        geom_point() +
-        facet_wrap(as.formula(paste("~", paste0(g,"_quintile")))) +
-        ggtitle(paste(g, "vs", ph, "by quintiles"))
-      print(p)
-    }
-
-    if ("deciles" %in% chosen) {
-      p <- ggplot(dat, aes_string(x=g, y=ph)) +
-        geom_point() +
-        facet_wrap(as.formula(paste("~", paste0(g,"_decile")))) +
-        ggtitle(paste(g, "vs", ph, "by deciles"))
-      print(p)
+    
+    # Determine if phenotype is categorical (<= 5 unique values) or quantitative
+    unique_vals <- length(unique(na.omit(dat[[ph]])))
+    is_categorical <- unique_vals <= 5
+    
+    for (g in grs_vars) {
+      
+      for (q_type in chosen_q) {
+        q_col <- paste0(g, "_", q_type)
+        if (!(q_col %in% names(dat))) next
+        
+        # Prepare data
+        df_facet <- dat %>%
+          select(all_of(c(ph, q_col, g))) %>%
+          rename(PHENO = 1, QUANTILE = 2, GRS = 3) %>%
+          filter(!is.na(PHENO), !is.na(GRS)) %>%
+          mutate(GRS = factor(GRS))
+        
+        if (nrow(df_facet) == 0) next
+        
+        # Create plot depending on phenotype type
+        if (is_categorical) {
+          # Categorical phenotype → x = PHENO, y = GRS
+          df_facet <- df_facet %>% mutate(PHENO = factor(PHENO))
+          p <- ggplot(df_facet, aes(x = PHENO, y = as.numeric(as.character(GRS)), fill = PHENO)) +
+            geom_violin(alpha = 0.4, trim = FALSE) +
+            geom_boxplot(width = 0.2, alpha = 0.7, show.legend = FALSE) +
+            labs(title = paste("GRS distribution across", ph, "(categorical)"),
+                 x = ph,
+                 y = paste("GRS (", g, ")", sep = "")) +
+            theme_bw() +
+            theme(plot.title = element_text(hjust = 0.5))
+        } else {
+          # Quantitative phenotype → x = QUANTILE, y = PHENO
+          df_facet <- df_facet %>% mutate(QUANTILE = factor(QUANTILE))
+          p <- ggplot(df_facet, aes(x = QUANTILE, y = PHENO, fill = QUANTILE)) +
+            geom_violin(alpha = 0.4, trim = FALSE) +
+            geom_boxplot(width = 0.2, alpha = 0.7, show.legend = FALSE) +
+            labs(title = paste("Phenotype", ph, "across", q_type, "of", g),
+                 x = paste(q_type, "level"),
+                 y = ph) +
+            theme_bw() +
+            theme(plot.title = element_text(hjust = 0.5))
+        }
+        
+        # Print and save
+        print(p)
+        ggsave(file.path(outdir, paste0(prefix, "_", ph, "_", q_col, "_boxplot_MULTI.png")),
+               p, width = 15, height = 10, units = "cm", dpi = 300)
+      }
     }
   }
 }
+
+plot_pheno_boxplots_multipanel(dat, grs_vars, pheno_vars, chosen_q, prefix, outdir)
+
 ```
 
-# Boxplots Across All Phenotypes
+# 7️⃣ Boxplots QUANTILE-PHENO (Categorical Only)
 
-```{r boxplots}
-for (g in grs_vars) {
+```{r boxplots_categorical, results='asis', fig.show='asis', fig.keep='all', warning=FALSE, message=FALSE}
 
-  if ("terciles" %in% chosen) {
-    p <- ggplot(dat, aes_string(x=paste0(g,"_tercile"), y=g)) +
-      geom_boxplot() +
-      ggtitle(paste("Boxplot of", g, "by terciles"))
-    print(p)
-  }
-
-  if ("quartiles" %in% chosen) {
-    p <- ggplot(dat, aes_string(x=paste0(g,"_quartile"), y=g)) +
-      geom_boxplot() +
-      ggtitle(paste("Boxplot of", g, "by quartiles"))
-    print(p)
-  }
-
-  if ("quintiles" %in% chosen) {
-    p <- ggplot(dat, aes_string(x=paste0(g,"_quintile"), y=g)) +
-      geom_boxplot() +
-      ggtitle(paste("Boxplot of", g, "by quintiles"))
-    print(p)
-  }
-
-  if ("deciles" %in%colnames(dat)) {
-    p <- ggplot(dat, aes_string(x=paste0(g,"_decile"), y=g)) +
-      geom_boxplot() +
-      ggtitle(paste("Boxplot of", g, "by deciles"))
-    print(p)
+plot_pheno_boxplots <- function(dat, grs_vars, pheno_vars, chosen_q, prefix, outdir) {
+  
+  ## If phenotype is quantitative → keep QUANTILE on x, PHENO on y
+  ## If phenotype is categorical / binary → do NOT use QUANTILE on x
+  ## instead: GRS on x, PHENO on y (and flip axes compared to the quantile plots)
+  
+  for (ph in pheno_vars) {
+    
+    is_quantitative <- is.numeric(dat[[ph]]) &&
+      length(unique(na.omit(dat[[ph]]))) > 5
+    
+    for (g in grs_vars) {
+      
+      ## ================================
+      ## CASE 1: Quantitative phenotype
+      ## ================================
+      if (is_quantitative) {
+        
+        for (q in chosen_q) {
+          q_col <- paste0(g, "_", q)
+          if (!q_col %in% names(dat)) next
+          
+          df <- dat[, c(ph, q_col)]
+          names(df) <- c("PHENO", "QUANTILE")
+          df <- df[!is.na(df$PHENO) & !is.na(df$QUANTILE), ]
+          if (nrow(df) == 0) next
+          
+          df$QUANTILE <- factor(df$QUANTILE)
+          
+          p <- ggplot(df, aes(x = QUANTILE, y = PHENO, fill = QUANTILE)) +
+            geom_violin(alpha = 0.4, trim = FALSE) +
+            geom_boxplot(alpha = 0.7) +
+            scale_fill_brewer(palette = "Blues") +
+            labs(title = paste(ph, "by", q, "of", g),
+                 x = q,
+                 y = ph) +
+            theme_bw() +
+            theme(plot.title = element_text(hjust = 0.5))
+          
+          safe_print_plot(p)
+          ggsave(file.path(outdir, paste0(prefix, "_", ph, "_", g, "_", q, "_boxplot.png")),
+                 p, width = 15, height = 10, units = "cm", dpi = 300)
+        }
+        
+        ## ================================
+        ## CASE 2: Categorical phenotype
+        ## ================================
+      } else {
+        
+        df <- dat[, c(ph, g)]
+        names(df) <- c("PHENO", "GRS")
+        df <- df[!is.na(df$PHENO) & !is.na(df$GRS), ]
+        if (nrow(df) == 0) next
+        
+        df$PHENO <- factor(df$PHENO)
+        
+        p <- ggplot(df, aes(x = PHENO, y = GRS, fill = PHENO)) +
+          geom_violin(alpha = 0.4, trim = FALSE) +
+          geom_boxplot(alpha = 0.7) +
+          scale_fill_brewer(palette = "Blues") +
+          labs(title = paste(g, "by", ph),
+               x = ph,
+               y = g) +
+          theme_bw() +
+          theme(plot.title = element_text(hjust = 0.5))
+        
+        safe_print_plot(p)
+        ggsave(file.path(outdir, paste0(prefix, "_", ph, "_", g, "_grs_boxplot.png")),
+               p, width = 15, height = 10, units = "cm", dpi = 300)
+      }
+    }
   }
 }
+
+plot_pheno_boxplots(dat, grs_vars, pheno_vars, chosen_q, prefix, outdir)
+
 ```
 
-# Decile Trend Analysis
+# 8️⃣ Scatterplots GRS-PHENO (Quantitative Only)
 
-```{r trend}
-for (g in grs_vars) {
+```{r scatterplots, results='asis', fig.show='hold', fig.keep='all', warning=FALSE, message=FALSE}
 
-  if ("deciles" %in% chosen) {
-    trend <- dat %>%
-      group_by(.data[[paste0(g,"_decile")]]) %>%
-      summarise(mean_ph = mean(.data[[pheno_vars[1]]], na.rm=TRUE))
+plot_pheno_scatter <- function(dat, grs_vars, pheno_vars, prefix, outdir) {
+  for (ph in pheno_vars) {
+    if (!is.numeric(dat[[ph]])) next
+    if (length(unique(na.omit(dat[[ph]]))) <= 5) next
+    
+    for (g in grs_vars) {
+      for (q in chosen_q) {
+        q_col <- paste0(g, "_", q)
+        if (!q_col %in% names(dat)) next
+        
+        df <- dat[, c(g, ph)]
+        names(df) <- c("GRS", "PHENO")
+        df <- df[!is.na(df$GRS) & !is.na(df$PHENO), ]
+        if (nrow(df) == 0) next
+        
+        p <- ggplot(df, aes(GRS, PHENO)) +
+          geom_point(color = "steelblue", alpha = 0.5) +
+          geom_smooth(method = "lm", se = TRUE, color = "steelblue") +
+          stat_poly_eq(aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")),
+                       formula = y ~ x, parse = TRUE) +
+          labs(title = paste(g, "vs", ph, "by", q),
+               x = g,
+               y = ph) +
+          theme_bw() +
+          theme(plot.title = element_text(hjust = 0.5))
+        
+        safe_print_plot(p)
+        ggsave(file.path(outdir, paste0(prefix, "_", g, "_", ph, "_scatter.png")),
+               p, width = 15, height = 10, units = "cm", dpi = 300)
+      }
+    }
+  }
+}
 
-    p <- ggplot(trend, aes_string(x=names(trend)[1], y="mean_ph")) +
+plot_pheno_scatter(dat, grs_vars, pheno_vars, prefix, outdir)
+
+```
+
+# 9️⃣ Scatterplots GRS-PHENO split by QUANTILE (Quantitative Only)
+
+```{r scatterplots_quantile, results='asis', fig.show='hold', fig.keep='all', warning=FALSE, message=FALSE}
+
+plot_pheno_scatter_quantile <- function(dat, grs_vars, pheno_vars, chosen_q, prefix, outdir) {
+  for (ph in pheno_vars) {
+    if (!is.numeric(dat[[ph]])) next
+    if (length(unique(na.omit(dat[[ph]]))) <= 5) next
+    
+    for (g in grs_vars) {
+      for (q in chosen_q) {
+        q_col <- paste0(g, "_", q)
+        if (!q_col %in% names(dat)) next
+        
+        df <- dat[, c(g, ph, q_col)]
+        names(df) <- c("GRS", "PHENO", "QUANTILE")
+        df <- df[!is.na(df$GRS) & !is.na(df$PHENO) & !is.na(df$QUANTILE), ]
+        if (nrow(df) == 0) next
+        
+        df$QUANTILE <- factor(df$QUANTILE)
+        
+        p <- ggplot(df, aes(GRS, PHENO)) +
+          geom_point(color = "steelblue", alpha = 0.5) +
+          geom_smooth(method = "lm", se = TRUE, color = "steelblue") +
+          stat_poly_eq(aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")),
+                       formula = y ~ x, parse = TRUE) +
+          facet_wrap(~ QUANTILE) +
+          labs(title = paste(g, "vs", ph, "by", q),
+               x = g,
+               y = ph) +
+          theme_bw() +
+          theme(plot.title = element_text(hjust = 0.5))
+        
+        safe_print_plot(p)
+        ggsave(file.path(outdir, paste0(prefix, "_", g, "_", ph, "_", q, "_scatter.png")),
+               p, width = 15, height = 15, units = "cm", dpi = 300)
+      }
+    }
+  }
+}
+
+plot_pheno_scatter_quantile(dat, grs_vars, pheno_vars, chosen_q, prefix, outdir)
+
+```
+
+
+# 🔟 Decile Trends
+
+```{r trends, results='asis', fig.show='asis', fig.keep='all', warning=FALSE, message=FALSE}
+
+plot_decile_trends <- function(dat, grs_vars, pheno, prefix, outdir) {
+  for (g in grs_vars) {
+    dec_col <- paste0(g, "_deciles")
+    if (!dec_col %in% names(dat)) next
+    
+    trend <- aggregate(
+      dat[[pheno]],
+      by = list(decile = dat[[dec_col]]),
+      FUN = mean,
+      na.rm = TRUE
+    )
+    if (all(is.na(trend$x))) next
+    
+    p <- ggplot(trend, aes(decile, x)) +
       geom_line() +
-      ggtitle(paste("Trend across deciles for", g))
-
-    print(p)
+      geom_point() +
+      labs(
+        title = paste("Trend across deciles for", g),
+        x = "Decile",
+        y = pheno
+      ) +
+      theme_bw() +
+      theme(plot.title = element_text(hjust = 0.5))
+    
+    safe_print_plot(p)
+    ggsave(file.path(outdir, paste0(prefix, "_", g, "_", pheno, "_trend.png")),
+           p, width = 15, height = 10, units = "cm", dpi = 300)
   }
 }
-```
 
+###plot_decile_trends(dat, grs_vars, pheno_vars[1], prefix, outdir)
+
+select_first_quantitative_pheno <- function(dat, pheno_vars, min_unique = 5) {
+  for (ph in pheno_vars) {
+    if (is.numeric(dat[[ph]]) &&
+        length(unique(na.omit(dat[[ph]]))) > min_unique) {
+      return(ph)
+    }
+  }
+  NULL
+}
+quant_pheno <- select_first_quantitative_pheno(dat, pheno_vars)
+
+if (!is.null(quant_pheno)) {
+  plot_decile_trends(
+    dat    = dat,
+    grs_vars = grs_vars,
+    pheno  = quant_pheno,
+    prefix = prefix,
+    outdir = outdir
+  )
+} else {
+  message("Skipping decile trends: no quantitative phenotype available")
+}
+
+```
