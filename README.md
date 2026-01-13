@@ -1,4 +1,4 @@
-Author: Gabriella Blokland, Maastricht University
+# Author: Gabriella Blokland, Maastricht University
 
 ## Example runs
 
